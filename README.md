@@ -1,12 +1,14 @@
-# SAK for Mac
+# SwitchSwitcher
 
 一个 macOS 原生的 Nintendo Switch 游戏文件转换工具，用 SwiftUI 编写。灵感来自 Windows 上的 [Switch Army Knife (SAK)](https://github.com/dezem/SAK)。
 
 ## 功能
 
+- **万物转 NSP**：导入 XCI / NSZ / XCZ / NSP；单文件直接转 NSP，多文件（本体 + 更新 + DLC）合并成一个 NSP
 - **XCI ⇄ NSP 互转**：也可以直接输入 NSZ / XCZ
 - **NSZ / XCZ 压缩与解压**：可调压缩等级，压缩后可校验
 - **合并本体 + 更新 + DLC**：合并成一个 XCI 或 NSP；同一内容有多个版本时，自动保留最新版本
+- **检测更新**：转换 / 合并 / 万物转 NSP 开始前会自动对照 titledb 检查；若缺少或落后会弹窗确认是否继续，更新包名称可复制。也可在侧边栏手动检测。不下载任何游戏内容
 
 所有功能都支持把文件拖进窗口，处理时实时显示进度和日志。
 
@@ -24,7 +26,7 @@
 ./scripts/build_app.sh
 ```
 
-脚本会自动下载 NSC_BUILDER 和 nsz 的源码到 `vendor/`，打上 `patches/` 里的 macOS 兼容补丁，编译后在 `dist/` 下生成 `Switch Army Knife.app`。
+脚本会自动下载 NSC_BUILDER 和 nsz 的源码到 `vendor/`，打上 `patches/` 里的 macOS 兼容补丁，编译后在 `dist/` 下生成 `SwitchSwitcher.app`。
 
 ## 使用
 
@@ -56,7 +58,7 @@
 
 ## 免责声明
 
-本项目不包含、也不会下载任何 Nintendo 密钥、固件或游戏文件。请只处理你自己合法拥有的游戏。本项目与 Nintendo 无关。
+本项目不包含、也不会下载任何 Nintendo 密钥、固件或游戏文件。「检测更新」仅从公开 titledb 拉取标题/版本元数据，用于对照你本地已有的文件。请只处理你自己合法拥有的游戏。本项目与 Nintendo 无关。
 
 ## 许可证
 

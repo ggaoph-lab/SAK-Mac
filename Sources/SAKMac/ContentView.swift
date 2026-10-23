@@ -1,23 +1,28 @@
+import AppKit
 import SwiftUI
 
 enum Tool: String, CaseIterable, Identifiable {
-    case convert, compress, merge, settings
+    case toNsp, convert, compress, merge, updates, settings
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .toNsp: "万物转 NSP"
         case .convert: "XCI ⇄ NSP 转换"
         case .compress: "NSZ / XCZ 压缩"
         case .merge: "合并本体 + 更新 + DLC"
+        case .updates: "检测更新"
         case .settings: "设置"
         }
     }
 
     var icon: String {
         switch self {
+        case .toNsp: "shippingbox"
         case .convert: "arrow.left.arrow.right"
         case .compress: "archivebox"
         case .merge: "square.stack.3d.up"
+        case .updates: "arrow.triangle.2.circlepath"
         case .settings: "gearshape"
         }
     }
@@ -25,7 +30,7 @@ enum Tool: String, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @Environment(AppModel.self) private var model
-    @State private var tool: Tool? = .convert
+    @State private var tool: Tool? = .toNsp
 
     var body: some View {
         NavigationSplitView {
@@ -39,10 +44,12 @@ struct ContentView: View {
                     SetupBanner { tool = .settings }
                 }
                 Group {
-                    switch tool ?? .convert {
+                    switch tool ?? .toNsp {
+                    case .toNsp: ToNspView()
                     case .convert: ConvertView()
                     case .compress: CompressView()
                     case .merge: MergeView()
+                    case .updates: UpdateCheckView()
                     case .settings: SettingsView()
                     }
                 }
@@ -54,8 +61,92 @@ struct ContentView: View {
                 LogConsole()
                     .frame(height: 180)
             }
-            .navigationTitle((tool ?? .convert).title)
+            .navigationTitle((tool ?? .toNsp).title)
+            .sheet(item: Binding(
+                get: { model.updateConfirm },
+                set: { newValue in
+                    // Dismiss via window chrome / Escape — only cancel if still pending.
+                    if newValue == nil, model.updateConfirm != nil {
+                        model.cancelUpdateConfirm()
+                    }
+                }
+            )) { prompt in
+                UpdateConfirmSheet(prompt: prompt)
+            }
         }
+    }
+}
+
+struct UpdateConfirmSheet: View {
+    @Environment(AppModel.self) private var model
+    let prompt: UpdateConfirmPrompt
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("更新检测提示")
+                .font(.title2.bold())
+            Text("任务：\(prompt.jobTitle)")
+                .foregroundStyle(.secondary)
+
+            if let failed = prompt.checkFailedMessage {
+                Text("无法完成更新检测：\(failed)\n是否仍要继续运行？")
+            } else {
+                Text("以下游戏缺少更新或版本落后。可先复制更新包名称自行补齐，或选择仍然继续。")
+            }
+
+            if !prompt.issues.isEmpty {
+                List(prompt.issues) { issue in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(issue.status.label)
+                                .foregroundStyle(issue.status == .missing ? Color.orange : Color.yellow)
+                            Text(issue.name).lineLimit(1)
+                            Spacer()
+                            Text("本地 \(issue.localVersion.map { "v\($0)" } ?? "无") → 最新 \(issue.latestVersion.map { "v\($0)" } ?? "—")")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        if !issue.suggestedName.isEmpty {
+                            HStack {
+                                Text(issue.suggestedName)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .lineLimit(2)
+                                Spacer()
+                                Button {
+                                    copyNames([issue.suggestedName])
+                                } label: {
+                                    Image(systemName: "doc.on.doc")
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(minHeight: 160, maxHeight: 280)
+            }
+
+            HStack {
+                if !prompt.copyableNames.isEmpty {
+                    Button("复制全部更新包名称") { copyNames(prompt.copyableNames) }
+                }
+                Spacer()
+                Button("取消") { model.cancelUpdateConfirm() }
+                    .keyboardShortcut(.cancelAction)
+                Button("仍然继续") { model.confirmUpdateAndContinue() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 520, minHeight: prompt.issues.isEmpty ? 180 : 360)
+    }
+
+    private func copyNames(_ names: [String]) {
+        guard !names.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(names.joined(separator: "\n"), forType: .string)
+        model.statusText = names.count == 1 ? "已复制更新包名称" : "已复制 \(names.count) 个更新包名称"
     }
 }
 
@@ -83,13 +174,13 @@ struct StatusBar: View {
             HStack {
                 Text(model.statusText).lineLimit(1).truncationMode(.middle)
                 Spacer()
-                if model.isRunning {
+                if model.isBusy {
                     Button("取消", role: .cancel) { model.cancel() }
                 } else {
                     Button("打开输出文件夹") { model.revealOutput() }
                 }
             }
-            if model.isRunning {
+            if model.isBusy {
                 if let progress = model.progress {
                     ProgressView(value: progress)
                 } else {

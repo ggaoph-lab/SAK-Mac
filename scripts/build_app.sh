@@ -1,12 +1,12 @@
 #!/bin/bash
-# Builds "Switch Army Knife.app" into SAKMac/dist.
+# Builds "SwitchSwitcher.app" into dist/.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENDOR="${VENDOR:-$ROOT/vendor}"
 NSCB_REPO="https://github.com/julesontheroad/NSC_BUILDER.git"
 NSZ_REPO="https://github.com/nicoboss/nsz.git"
-APP_NAME="Switch Army Knife"
+APP_NAME="SwitchSwitcher"
 VERSION="1.0.0"
 
 cd "$ROOT"
@@ -33,6 +33,15 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/backend"
 cp "$BIN" "$APP/Contents/MacOS/SAKMac"
 cp "$ROOT/Resources/setup_backend.sh" "$APP/Contents/Resources/"
+cp "$ROOT/Resources/check_updates.py" "$APP/Contents/Resources/"
+
+ICONSET="$(mktemp -d)/AppIcon.iconset"
+mkdir -p "$ICONSET"
+for size in 16 32 128 256 512; do
+    sips -z $size $size "$ROOT/Resources/AppIcon.png" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+    sips -z $((size * 2)) $((size * 2)) "$ROOT/Resources/AppIcon.png" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 cp "$ROOT/Resources/requirements.txt" "$APP/Contents/Resources/backend/"
 
 BACKEND="$APP/Contents/Resources/backend"
@@ -63,6 +72,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key><string>local.sak.mac</string>
     <key>CFBundleExecutable</key><string>SAKMac</string>
     <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>

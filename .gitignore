@@ -4,3 +4,5 @@ vendor/
 .DS_Store
 *.keys
 keys.txt
+__pycache__/
+*.pyc

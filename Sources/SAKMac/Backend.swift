@@ -14,6 +14,7 @@ enum BackendPaths {
 
     static var bundledBackend: URL { resources.appendingPathComponent("backend", isDirectory: true) }
     static var setupScript: URL { resources.appendingPathComponent("setup_backend.sh") }
+    static var checkUpdatesScript: URL { resources.appendingPathComponent("check_updates.py") }
 
     static var python: URL { support.appendingPathComponent("venv/bin/python") }
     static var nsz: URL { support.appendingPathComponent("venv/bin/nsz") }

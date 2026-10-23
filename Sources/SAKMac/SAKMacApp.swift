@@ -10,7 +10,7 @@ struct SAKMacApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Switch Army Knife") {
+        WindowGroup("SwitchSwitcher") {
             ContentView()
                 .environment(model)
                 .frame(minWidth: 820, minHeight: 620)

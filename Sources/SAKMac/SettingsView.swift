@@ -44,7 +44,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                 HStack {
                     Button(model.backendReady ? "重新安装后端" : "安装后端") { model.installBackend() }
-                        .disabled(model.isRunning)
+                        .disabled(model.isBusy)
                     Button("在 Finder 中显示") {
                         try? FileManager.default.createDirectory(at: BackendPaths.support, withIntermediateDirectories: true)
                         NSWorkspace.shared.open(BackendPaths.support)

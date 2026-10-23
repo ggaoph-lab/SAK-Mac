@@ -28,6 +28,56 @@ struct PreflightError: LocalizedError {
     var errorDescription: String? { message }
 }
 
+enum UpdateCheckStatus: String, Codable {
+    case missing, outdated, current, no_update_listed
+
+    var label: String {
+        switch self {
+        case .missing: "缺少更新"
+        case .outdated: "有新版本"
+        case .current: "已是最新"
+        case .no_update_listed: "库中无更新记录"
+        }
+    }
+}
+
+struct UpdateCheckResult: Identifiable, Hashable {
+    var id: String { baseId }
+    var status: UpdateCheckStatus
+    var name: String
+    var baseId: String
+    var updateId: String
+    var localVersion: Int?
+    var latestVersion: Int?
+    var suggestedName: String
+    var files: [String]
+}
+
+struct UpdateCheckSummary {
+    var games = 0
+    var missing = 0
+    var outdated = 0
+    var current = 0
+    var unknown = 0
+    var errors = 0
+    var files = 0
+}
+
+/// Shown before convert/merge when updates are missing/outdated, or when the check itself failed.
+struct UpdateConfirmPrompt: Identifiable {
+    let id = UUID()
+    let jobTitle: String
+    /// Missing / outdated entries (may be empty if only the check failed).
+    let issues: [UpdateCheckResult]
+    /// Non-nil when titledb/local parse failed; user can still choose to continue.
+    let checkFailedMessage: String?
+    let continueAction: () -> Void
+
+    var copyableNames: [String] {
+        issues.map(\.suggestedName).filter { !$0.isEmpty }
+    }
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -40,17 +90,26 @@ final class AppModel {
 
     var backendReady = BackendPaths.isInstalled
     var isRunning = false
+    /// True while a pre-job update check is in progress (before the real convert/merge starts).
+    var isPreflightChecking = false
     var statusText = "就绪"
     var progress: Double?
     var progressDetail = ""
     var log: [LogLine] = []
 
+    var toNspFiles: [URL] = []
     var convertFiles: [URL] = []
     var compressFiles: [URL] = []
     var mergeFiles: [URL] = []
+    var updateCheckFiles: [URL] = []
+    var updateCheckResults: [UpdateCheckResult] = []
+    var updateCheckSummary: UpdateCheckSummary?
+    var updateConfirm: UpdateConfirmPrompt?
 
     private var task: Task<Void, Never>?
     private var sawError = false
+
+    var isBusy: Bool { isRunning || isPreflightChecking }
 
     init() {
         let defaults = UserDefaults.standard
@@ -78,6 +137,26 @@ final class AppModel {
     }
 
     func convert(files: [URL], to target: ConvertTarget) {
+        runWithUpdatePreflight(files: files, jobTitle: "转换为 \(target.label)") { [weak self] in
+            self?.startConvert(files: files, to: target)
+        }
+    }
+
+    /// One-shot: any mix of XCI/NSP/NSZ/XCZ → NSP.
+    /// Single file uses convert; multiple files (base + update + DLC) are merged into one NSP.
+    func toNsp(files: [URL]) {
+        runWithUpdatePreflight(files: files, jobTitle: "万物转 NSP") { [weak self] in
+            self?.startToNsp(files: files)
+        }
+    }
+
+    func merge(files: [URL], to target: MergeTarget) {
+        runWithUpdatePreflight(files: files, jobTitle: "合并为 \(target.label)") { [weak self] in
+            self?.startMerge(files: files, to: target)
+        }
+    }
+
+    private func startConvert(files: [URL], to target: ConvertTarget) {
         start("转换为 \(target.label)") { model in
             let out = try model.prepareSquirrel()
             for (i, file) in files.enumerated() {
@@ -87,7 +166,27 @@ final class AppModel {
         }
     }
 
-    func merge(files: [URL], to target: MergeTarget) {
+    private func startToNsp(files: [URL]) {
+        start("万物转 NSP") { model in
+            let out = try model.prepareSquirrel()
+            if files.count == 1, let file = files.first {
+                model.setStatus("转换为 NSP：\(file.lastPathComponent)")
+                try await model.squirrel(["-o", out.path, "-t", "nsp", "-dc", file.path])
+            } else {
+                let list = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("sak-tonsp-\(UUID().uuidString).txt")
+                try files.map(\.path).joined(separator: "\n").appending("\n")
+                    .write(to: list, atomically: true, encoding: .utf8)
+                defer { try? FileManager.default.removeItem(at: list) }
+                model.setStatus("合并 \(files.count) 个文件为 NSP…")
+                try await model.squirrel([
+                    "-t", "cnsp", "-o", out.path, "-tfile", list.path, "-dmul", "calculate",
+                ])
+            }
+        }
+    }
+
+    private func startMerge(files: [URL], to target: MergeTarget) {
         start("合并为 \(target.label)") { model in
             let out = try model.prepareSquirrel()
             let list = FileManager.default.temporaryDirectory
@@ -100,6 +199,74 @@ final class AppModel {
                 "-t", target.squirrelType, "-o", out.path, "-tfile", list.path, "-dmul", "calculate",
             ])
         }
+    }
+
+    /// Check updates before a job; prompt if missing/outdated (or if the check fails).
+    func runWithUpdatePreflight(files: [URL], jobTitle: String, action: @escaping () -> Void) {
+        guard !isBusy else { return }
+        isPreflightChecking = true
+        sawError = false
+        progress = nil
+        progressDetail = ""
+        statusText = "运行前检测更新…"
+        append("── 运行前检测更新（\(jobTitle)）──", .command)
+
+        task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let issues = try await self.gatherUpdateIssues(files: files, recursive: false)
+                try Task.checkCancellation()
+                self.isPreflightChecking = false
+                self.task = nil
+                self.progress = nil
+                self.progressDetail = ""
+                if issues.isEmpty {
+                    self.append("更新检测通过，开始任务", .success)
+                    action()
+                } else {
+                    self.statusText = "发现 \(issues.count) 项更新问题，等待确认是否继续"
+                    self.updateConfirm = UpdateConfirmPrompt(
+                        jobTitle: jobTitle,
+                        issues: issues,
+                        checkFailedMessage: nil,
+                        continueAction: action
+                    )
+                }
+            } catch is CancellationError {
+                self.isPreflightChecking = false
+                self.task = nil
+                self.progress = nil
+                self.progressDetail = ""
+                self.statusText = "已取消"
+                self.append("已取消更新检测", .error)
+            } catch {
+                self.isPreflightChecking = false
+                self.task = nil
+                self.progress = nil
+                self.progressDetail = ""
+                self.append("更新检测失败：\(error.localizedDescription)", .error)
+                self.statusText = "更新检测失败，等待确认是否继续"
+                self.updateConfirm = UpdateConfirmPrompt(
+                    jobTitle: jobTitle,
+                    issues: [],
+                    checkFailedMessage: error.localizedDescription,
+                    continueAction: action
+                )
+            }
+        }
+    }
+
+    func confirmUpdateAndContinue() {
+        guard let prompt = updateConfirm else { return }
+        updateConfirm = nil
+        append("用户确认继续：\(prompt.jobTitle)", .info)
+        prompt.continueAction()
+    }
+
+    func cancelUpdateConfirm() {
+        updateConfirm = nil
+        statusText = "已取消"
+        append("用户取消，未开始任务", .error)
     }
 
     func compress(files: [URL], level: Int, verify: Bool) {
@@ -120,6 +287,46 @@ final class AppModel {
         }
     }
 
+    func checkUpdates(files: [URL], recursive: Bool = true) {
+        start("检测更新") { model in
+            _ = try await model.gatherUpdateIssues(files: files, recursive: recursive)
+        }
+    }
+
+    /// Runs titledb check; updates `updateCheckResults` / summary; returns missing+outdated items.
+    @discardableResult
+    private func gatherUpdateIssues(files: [URL], recursive: Bool) async throws -> [UpdateCheckResult] {
+        _ = try prepareSquirrel()
+        guard FileManager.default.fileExists(atPath: BackendPaths.checkUpdatesScript.path) else {
+            throw PreflightError(message: "找不到 check_updates.py，请重新构建应用")
+        }
+        updateCheckResults = []
+        updateCheckSummary = nil
+
+        let list = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sak-check-\(UUID().uuidString).txt")
+        try files.map(\.path).joined(separator: "\n").appending("\n")
+            .write(to: list, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: list) }
+
+        setStatus("对照 titledb 检查 \(files.count) 项…")
+        var args = [
+            BackendPaths.checkUpdatesScript.path,
+            "--ztools", BackendPaths.ztools.path,
+            "-tfile", list.path,
+        ]
+        if recursive { args.append("--recursive") }
+        append("$ check_updates.py " + args.dropFirst().joined(separator: " "), .command)
+        try await ProcessRunner.run(BackendPaths.python, args, cwd: BackendPaths.ztools) {
+            [weak self] line in Task { @MainActor in self?.handleUpdateCheckOutput(line) }
+        }
+        try Task.checkCancellation()
+        if sawError, updateCheckResults.isEmpty {
+            throw PreflightError(message: "更新检测未得到有效结果，请查看日志")
+        }
+        return updateCheckResults.filter { $0.status == .missing || $0.status == .outdated }
+    }
+
     func cancel() {
         task?.cancel()
     }
@@ -131,7 +338,7 @@ final class AppModel {
     // MARK: - Plumbing
 
     private func start(_ title: String, _ work: @escaping @MainActor (AppModel) async throws -> Void) {
-        guard !isRunning else { return }
+        guard !isBusy else { return }
         isRunning = true
         sawError = false
         progress = nil
@@ -216,7 +423,105 @@ final class AppModel {
         }
     }
 
+    private static func jsonInt(_ value: Any?) -> Int? {
+        switch value {
+        case let i as Int: return i
+        case let n as NSNumber: return n.intValue
+        case let s as String: return Int(s)
+        default: return nil
+        }
+    }
+
+    private static func jsonDouble(_ value: Any?) -> Double? {
+        switch value {
+        case let d as Double: return d
+        case let i as Int: return Double(i)
+        case let n as NSNumber: return n.doubleValue
+        case let s as String: return Double(s)
+        default: return nil
+        }
+    }
+
     private static let tqdmPercent = try! NSRegularExpression(pattern: #"(\d{1,3}(?:\.\d+)?)%\|"#)
+
+    private func handleUpdateCheckOutput(_ line: String) {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("{"),
+              let data = trimmed.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String
+        else {
+            handleOutput(line)
+            return
+        }
+
+        switch type {
+        case "status":
+            if let message = json["message"] as? String {
+                statusText = message
+                append(message, .info)
+            }
+        case "progress":
+            if let percent = Self.jsonDouble(json["percent"]) { progress = percent / 100 }
+            let step = json["step"] as? String ?? ""
+            let file = (json["file"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
+            progressDetail = [step, file].filter { !$0.isEmpty }.joined(separator: " · ")
+        case "result":
+            guard let statusRaw = json["status"] as? String,
+                  let status = UpdateCheckStatus(rawValue: statusRaw),
+                  let name = json["name"] as? String,
+                  let baseId = json["baseId"] as? String,
+                  let updateId = json["updateId"] as? String
+            else { return }
+            let suggested = json["suggestedName"] as? String ?? ""
+            let result = UpdateCheckResult(
+                status: status,
+                name: name,
+                baseId: baseId,
+                updateId: updateId,
+                localVersion: Self.jsonInt(json["localVersion"]),
+                latestVersion: Self.jsonInt(json["latestVersion"]),
+                suggestedName: suggested,
+                files: json["files"] as? [String] ?? []
+            )
+            if let idx = updateCheckResults.firstIndex(where: { $0.baseId == baseId }) {
+                updateCheckResults[idx] = result
+            } else {
+                updateCheckResults.append(result)
+            }
+            let verLocal = result.localVersion.map { "v\($0)" } ?? "无"
+            let verLatest = result.latestVersion.map { "v\($0)" } ?? "—"
+            append("\(result.status.label)：\(name)  本地 \(verLocal) → 最新 \(verLatest)", .info)
+            if !suggested.isEmpty, status == .missing || status == .outdated {
+                append("  更新包名称：\(suggested)", .command)
+            }
+        case "summary":
+            let summary = UpdateCheckSummary(
+                games: Self.jsonInt(json["games"]) ?? 0,
+                missing: Self.jsonInt(json["missing"]) ?? 0,
+                outdated: Self.jsonInt(json["outdated"]) ?? 0,
+                current: Self.jsonInt(json["current"]) ?? 0,
+                unknown: Self.jsonInt(json["unknown"]) ?? 0,
+                errors: Self.jsonInt(json["errors"]) ?? 0,
+                files: Self.jsonInt(json["files"]) ?? 0
+            )
+            updateCheckSummary = summary
+            append(
+                "汇总：\(summary.games) 款游戏，缺少 \(summary.missing)，可升级 \(summary.outdated)，已最新 \(summary.current)",
+                .success
+            )
+        case "file_error":
+            sawError = true
+            let file = (json["file"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? "?"
+            let message = json["message"] as? String ?? "未知错误"
+            append("解析失败 \(file)：\(message)", .error)
+        case "error":
+            sawError = true
+            append(json["message"] as? String ?? "检测失败", .error)
+        default:
+            break
+        }
+    }
 
     private func handleOutput(_ line: String) {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
