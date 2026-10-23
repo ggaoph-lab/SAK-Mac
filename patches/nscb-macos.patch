@@ -1,0 +1,151 @@
+diff --git a/py/ztools/Fs/ChromeNacp.py b/py/ztools/Fs/ChromeNacp.py
+index 326313c..ceaea67 100644
+--- a/py/ztools/Fs/ChromeNacp.py
++++ b/py/ztools/Fs/ChromeNacp.py
+@@ -1,7 +1,11 @@
+ from Fs.File import File
+ import Fs.Type
+ from binascii import hexlify as hx, unhexlify as uhx
+-from enum import IntEnum
++from enum import Enum, IntEnum as _IntEnum
++
++# Python 3.11+ made str(IntEnum) return the bare number; this code compares against 'Content.META' etc.
++class IntEnum(_IntEnum):
++	__str__ = Enum.__str__
+ import Print
+ 
+ import Keys
+diff --git a/py/ztools/Fs/ChromeNca.py b/py/ztools/Fs/ChromeNca.py
+index cb3432c..19cbcbf 100644
+--- a/py/ztools/Fs/ChromeNca.py
++++ b/py/ztools/Fs/ChromeNca.py
+@@ -959,7 +959,7 @@ class Nca(File):
+ 		RDSV=str(RDSV)
+ 		xmlname = str(self._path)
+ 		xmlname = xmlname[:-4] + '.xml'
+-		outfolder = str(ofolder)+'\\'
++		outfolder = str(ofolder)
+ 		textpath = os.path.join(outfolder, xmlname)
+ 		with open(textpath, 'w+') as tfile:
+ 			tfile.write('<?xml version="1.0" encoding="utf-8"?>' + '\n')
+@@ -1085,7 +1085,7 @@ class Nca(File):
+ 		RDSV=str(RDSV)
+ 		xmlname = str(self._path)
+ 		xmlname = xmlname[:-4] + '.xml'
+-		outfolder = str(ofolder)+'\\'
++		outfolder = str(ofolder)
+ 		textpath = os.path.join(outfolder, xmlname)
+ 		with open(textpath, 'w+') as tfile:
+ 			tfile.write('<?xml version="1.0" encoding="utf-8"?>' + '\n')
+diff --git a/py/ztools/Fs/File.py b/py/ztools/Fs/File.py
+index 3a09061..484b78f 100644
+--- a/py/ztools/Fs/File.py
++++ b/py/ztools/Fs/File.py
+@@ -1,4 +1,8 @@
+-from enum import IntEnum
++from enum import Enum, IntEnum as _IntEnum
++
++# Python 3.11+ made str(IntEnum) return the bare number; this code compares against 'Content.META' etc.
++class IntEnum(_IntEnum):
++	__str__ = Enum.__str__
+ import nutFs.Type
+ import aes128
+ import Print
+diff --git a/py/ztools/Fs/Nacp.py b/py/ztools/Fs/Nacp.py
+index 7b86dc3..f5acd10 100644
+--- a/py/ztools/Fs/Nacp.py
++++ b/py/ztools/Fs/Nacp.py
+@@ -1,7 +1,11 @@
+ from Fs.File import File
+ import Fs.Type
+ from binascii import hexlify as hx, unhexlify as uhx
+-from enum import IntEnum
++from enum import Enum, IntEnum as _IntEnum
++
++# Python 3.11+ made str(IntEnum) return the bare number; this code compares against 'Content.META' etc.
++class IntEnum(_IntEnum):
++	__str__ = Enum.__str__
+ import Print
+ 
+ import Keys
+diff --git a/py/ztools/Fs/Nca.py b/py/ztools/Fs/Nca.py
+index b46e232..d6049f2 100644
+--- a/py/ztools/Fs/Nca.py
++++ b/py/ztools/Fs/Nca.py
+@@ -1039,7 +1039,7 @@ class Nca(File):
+ 		RDSV=str(RDSV)
+ 		xmlname = str(self._path)
+ 		xmlname = xmlname[:-4] + '.xml'
+-		outfolder = str(ofolder)+'\\'
++		outfolder = str(ofolder)
+ 		textpath = os.path.join(outfolder, xmlname)
+ 		with open(textpath, 'w+') as tfile:
+ 			tfile.write('<?xml version="1.0" encoding="utf-8"?>' + '\n')
+@@ -1165,7 +1165,7 @@ class Nca(File):
+ 		RDSV=str(RDSV)
+ 		xmlname = str(self._path)
+ 		xmlname = xmlname[:-4] + '.xml'
+-		outfolder = str(ofolder)+'\\'
++		outfolder = str(ofolder)
+ 		textpath = os.path.join(outfolder, xmlname)
+ 		with open(textpath, 'w+') as tfile:
+ 			tfile.write('<?xml version="1.0" encoding="utf-8"?>' + '\n')
+diff --git a/py/ztools/Fs/Type.py b/py/ztools/Fs/Type.py
+index fec3889..2ad0795 100644
+--- a/py/ztools/Fs/Type.py
++++ b/py/ztools/Fs/Type.py
+@@ -1,4 +1,8 @@
+-from enum import IntEnum
++from enum import Enum, IntEnum as _IntEnum
++
++# Python 3.11+ made str(IntEnum) return the bare number; this code compares against 'Content.META' etc.
++class IntEnum(_IntEnum):
++	__str__ = Enum.__str__
+ 
+ class Content(IntEnum):
+ 	PROGRAM = 0x0
+diff --git a/py/ztools/nutFs/File.py b/py/ztools/nutFs/File.py
+index 3a09061..484b78f 100644
+--- a/py/ztools/nutFs/File.py
++++ b/py/ztools/nutFs/File.py
+@@ -1,4 +1,8 @@
+-from enum import IntEnum
++from enum import Enum, IntEnum as _IntEnum
++
++# Python 3.11+ made str(IntEnum) return the bare number; this code compares against 'Content.META' etc.
++class IntEnum(_IntEnum):
++	__str__ = Enum.__str__
+ import nutFs.Type
+ import aes128
+ import Print
+diff --git a/py/ztools/nutFs/Nacp.py b/py/ztools/nutFs/Nacp.py
+index 9aa4016..ec70e24 100644
+--- a/py/ztools/nutFs/Nacp.py
++++ b/py/ztools/nutFs/Nacp.py
+@@ -1,7 +1,11 @@
+ from nutFs.File import File
+ import nutFs.Type
+ from binascii import hexlify as hx, unhexlify as uhx
+-from enum import IntEnum
++from enum import Enum, IntEnum as _IntEnum
++
++# Python 3.11+ made str(IntEnum) return the bare number; this code compares against 'Content.META' etc.
++class IntEnum(_IntEnum):
++	__str__ = Enum.__str__
+ import Print
+ import Keys
+ #Some of this may have changed in 7.x.x+
+diff --git a/py/ztools/nutFs/Type.py b/py/ztools/nutFs/Type.py
+index 65936e9..0c1bdae 100644
+--- a/py/ztools/nutFs/Type.py
++++ b/py/ztools/nutFs/Type.py
+@@ -1,4 +1,8 @@
+-from enum import IntEnum
++from enum import Enum, IntEnum as _IntEnum
++
++# Python 3.11+ made str(IntEnum) return the bare number; this code compares against 'Content.META' etc.
++class IntEnum(_IntEnum):
++	__str__ = Enum.__str__
+ 
+ class Content(IntEnum):
+ 	PROGRAM = 0x0

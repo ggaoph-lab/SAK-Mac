@@ -1,0 +1,6 @@
+.build/
+dist/
+vendor/
+.DS_Store
+*.keys
+keys.txt

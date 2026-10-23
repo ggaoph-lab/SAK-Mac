@@ -1,0 +1,14 @@
+pycryptodome
+zstandard
+enlighten
+tqdm
+colorama
+urllib3
+unidecode
+requests
+beautifulsoup4
+chardet
+pykakasi
+pillow
+ujson
+googletrans
