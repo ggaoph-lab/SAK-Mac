@@ -35,15 +35,15 @@ struct SettingsView: View {
 
             Section("后端") {
                 Label(
-                    model.backendReady ? "已安装（NSC_BUILDER + nsz）" : "未安装",
+                    model.backendReady ? "已内置（Python + NSC_BUILDER + nsz）" : "未就绪",
                     systemImage: model.backendReady ? "checkmark.circle.fill" : "xmark.circle.fill"
                 )
                 .foregroundStyle(model.backendReady ? .green : .red)
-                Text("首次使用需要联网安装 Python 依赖，大约需要 1 分钟。需要本机已安装 Python 3.9 或更高版本。")
+                Text("转换引擎已随应用打包，无需安装系统 Python，也无需联网下载依赖。首次运行只会在本机写入一小份可写配置。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack {
-                    Button(model.backendReady ? "重新安装后端" : "安装后端") { model.installBackend() }
+                    Button("修复后端") { model.repairBackend() }
                         .disabled(model.isBusy)
                     Button("在 Finder 中显示") {
                         try? FileManager.default.createDirectory(at: BackendPaths.support, withIntermediateDirectories: true)

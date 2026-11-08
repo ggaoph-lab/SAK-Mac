@@ -119,20 +119,45 @@ final class AppModel {
         outputDir = defaults.string(forKey: "outputDir")
             ?? FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Downloads/SAK Output").path
+        // Deploy writable NSC_BUILDER copy locally (no network / no system Python).
+        refreshBackendStatus()
     }
 
     var keysAvailable: Bool { FileManager.default.fileExists(atPath: keysPath) }
 
+    @discardableResult
+    func refreshBackendStatus() -> Bool {
+        do {
+            _ = try BackendPaths.ensureDeployed()
+            backendReady = BackendPaths.isInstalled
+        } catch {
+            backendReady = false
+        }
+        return backendReady
+    }
+
     // MARK: - Jobs
 
-    func installBackend() {
-        start("安装后端") { model in
-            model.append("后端将安装到 \(BackendPaths.support.path)", .info)
-            try await ProcessRunner.run(
-                URL(fileURLWithPath: "/bin/bash"),
-                [BackendPaths.setupScript.path, BackendPaths.bundledBackend.path, BackendPaths.support.path]
-            ) { line in Task { @MainActor in model.append(line, .info) } }
+    /// Re-copy the bundled NSC_BUILDER tree (offline). Python deps stay inside the app.
+    func repairBackend() {
+        start("修复后端") { model in
+            let fm = FileManager.default
+            let marker = BackendPaths.installedVersion
+            if fm.fileExists(atPath: marker.path) {
+                try fm.removeItem(at: marker)
+            }
+            let didCopy = try BackendPaths.ensureDeployed()
             model.backendReady = BackendPaths.isInstalled
+            if model.backendReady {
+                model.append(
+                    didCopy
+                        ? "后端已就绪（工具已部署到 \(BackendPaths.support.path)）"
+                        : "后端已就绪（内置 Python + 依赖）",
+                    .success
+                )
+            } else {
+                throw PreflightError(message: "修复失败：应用包可能不完整")
+            }
         }
     }
 
@@ -169,35 +194,177 @@ final class AppModel {
     private func startToNsp(files: [URL]) {
         start("万物转 NSP") { model in
             let out = try model.prepareSquirrel()
+            let started = Date()
             if files.count == 1, let file = files.first {
                 model.setStatus("转换为 NSP：\(file.lastPathComponent)")
                 try await model.squirrel(["-o", out.path, "-t", "nsp", "-dc", file.path])
             } else {
-                let list = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("sak-tonsp-\(UUID().uuidString).txt")
-                try files.map(\.path).joined(separator: "\n").appending("\n")
-                    .write(to: list, atomically: true, encoding: .utf8)
-                defer { try? FileManager.default.removeItem(at: list) }
-                model.setStatus("合并 \(files.count) 个文件为 NSP…")
-                try await model.squirrel([
-                    "-t", "cnsp", "-o", out.path, "-tfile", list.path, "-dmul", "calculate",
-                ])
+                try await model.mergeNormalized(files: files, to: .nsp, outputDir: out)
             }
+            let produced = try model.requireNewPackages(in: out, since: started, extensions: ["nsp"])
+            model.cleanupCnmtXml(in: out, since: started)
+            model.append("成品：\(produced.map(\.lastPathComponent).joined(separator: ", "))", .success)
         }
     }
 
     private func startMerge(files: [URL], to target: MergeTarget) {
         start("合并为 \(target.label)") { model in
             let out = try model.prepareSquirrel()
-            let list = FileManager.default.temporaryDirectory
-                .appendingPathComponent("sak-merge-\(UUID().uuidString).txt")
-            try files.map(\.path).joined(separator: "\n").appending("\n")
-                .write(to: list, atomically: true, encoding: .utf8)
-            defer { try? FileManager.default.removeItem(at: list) }
-            model.setStatus("合并 \(files.count) 个文件…")
-            try await model.squirrel([
-                "-t", target.squirrelType, "-o", out.path, "-tfile", list.path, "-dmul", "calculate",
-            ])
+            let started = Date()
+            try await model.mergeNormalized(files: files, to: target, outputDir: out)
+            let produced = try model.requireNewPackages(
+                in: out,
+                since: started,
+                extensions: [target.rawValue]
+            )
+            model.cleanupCnmtXml(in: out, since: started)
+            model.append("成品：\(produced.map(\.lastPathComponent).joined(separator: ", "))", .success)
+        }
+    }
+
+    /// Decompress → unify to NSP → merge. Accepts any mix of XCI/NSP/NSZ/XCZ.
+    private func mergeNormalized(files: [URL], to target: MergeTarget, outputDir: URL) async throws {
+        let work = try makeWorkDir(named: "merge")
+        defer { try? FileManager.default.removeItem(at: work) }
+
+        append("① 解压压缩包（NSZ/XCZ）…", .info)
+        let decompressed = try await decompressForMerge(files: files, workDir: work)
+
+        append("② 统一格式为 NSP…", .info)
+        let nspParts = try await convertAllToNsp(files: decompressed, workDir: work)
+        guard nspParts.count >= 2 else {
+            throw PreflightError(message: "统一格式后可用文件不足 2 个，无法合并")
+        }
+
+        setStatus("③ 合并 \(nspParts.count) 个 NSP 为 \(target.label)…")
+        append("③ 合并 \(nspParts.count) 个 NSP → \(target.label)", .info)
+        let list = work.appendingPathComponent("merge-list.txt")
+        try nspParts.map(\.path).joined(separator: "\n").appending("\n")
+            .write(to: list, atomically: true, encoding: .utf8)
+        try await squirrel([
+            "-t", target.squirrelType, "-o", outputDir.path, "-tfile", list.path, "-dmul", "calculate",
+        ])
+    }
+
+    private func makeWorkDir(named: String) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SAKMac-\(named)-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// NSZ→NSP、XCZ→XCI；其余原样返回。
+    private func decompressForMerge(files: [URL], workDir: URL) async throws -> [URL] {
+        var result: [URL] = []
+        let compressed = files.filter { ["nsz", "xcz"].contains($0.pathExtension.lowercased()) }
+        let plain = files.filter { !["nsz", "xcz"].contains($0.pathExtension.lowercased()) }
+        result.append(contentsOf: plain)
+
+        guard !compressed.isEmpty else { return result }
+
+        let before = directorySnapshot(workDir)
+        setStatus("解压 \(compressed.count) 个压缩包…")
+        try await nsz(["-D", "--keys", keysPath, "-o", workDir.path] + compressed.map(\.path))
+        let created = newFiles(in: workDir, since: before)
+            .filter { ["nsp", "xci"].contains($0.pathExtension.lowercased()) }
+        if created.count < compressed.count {
+            throw PreflightError(message: "解压未完成：期望 \(compressed.count) 个，实际得到 \(created.count) 个")
+        }
+        result.append(contentsOf: created)
+        return result
+    }
+
+    /// 已是 NSP 的直接用；XCI 先转成 NSP 再参与合并。
+    private func convertAllToNsp(files: [URL], workDir: URL) async throws -> [URL] {
+        var nspParts: [URL] = []
+        let alreadyNsp = files.filter { $0.pathExtension.lowercased() == "nsp" }
+        let needConvert = files.filter { $0.pathExtension.lowercased() == "xci" }
+        nspParts.append(contentsOf: alreadyNsp)
+
+        for (i, file) in needConvert.enumerated() {
+            setStatus("统一格式 (\(i + 1)/\(needConvert.count))：\(file.lastPathComponent) → NSP")
+            let before = directorySnapshot(workDir)
+            try await squirrel(["-o", workDir.path, "-t", "nsp", "-dc", file.path])
+            let created = newFiles(in: workDir, since: before)
+                .filter { $0.pathExtension.lowercased() == "nsp" }
+            guard let produced = created.max(by: { fileSize($0) < fileSize($1) }) else {
+                throw PreflightError(message: "转换失败，未生成 NSP：\(file.lastPathComponent)")
+            }
+            nspParts.append(produced)
+            cleanupCnmtXml(in: workDir, since: Date.distantPast)
+        }
+
+        let unsupported = files.filter { !["nsp", "xci"].contains($0.pathExtension.lowercased()) }
+        if !unsupported.isEmpty {
+            let names = unsupported.map(\.lastPathComponent).joined(separator: ", ")
+            throw PreflightError(message: "不支持的文件格式：\(names)")
+        }
+        return nspParts
+    }
+
+    private func directorySnapshot(_ dir: URL) -> Set<String> {
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        return Set(files)
+    }
+
+    private func newFiles(in dir: URL, since before: Set<String>) -> [URL] {
+        let after = directorySnapshot(dir)
+        return after.subtracting(before).map { dir.appendingPathComponent($0) }
+    }
+
+    private func fileSize(_ url: URL) -> Int {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+    }
+
+    /// Require a newly written package (≥1 MB) in the output folder.
+    @discardableResult
+    private func requireNewPackages(in dir: URL, since: Date, extensions: [String]) throws -> [URL] {
+        let fm = FileManager.default
+        let exts = Set(extensions.map { $0.lowercased() })
+        let cutoff = since.addingTimeInterval(-5)
+        let urls = (try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        let matches = urls.filter { url in
+            guard exts.contains(url.pathExtension.lowercased()) else { return false }
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let modified = values?.contentModificationDate ?? .distantPast
+            let size = values?.fileSize ?? 0
+            return modified >= cutoff && size > 1_000_000
+        }
+
+        guard !matches.isEmpty else {
+            let want = extensions.map { $0.uppercased() }.joined(separator: "/")
+            throw PreflightError(
+                message: "未在输出目录找到新的 \(want) 成品（.cnmt.xml 只是元数据，不是游戏包）。请检查日志后重试。"
+            )
+        }
+        return matches.sorted { fileSize($0) > fileSize($1) }
+    }
+
+    private func cleanupCnmtXml(in dir: URL, since: Date) {
+        let fm = FileManager.default
+        let cutoff = since.addingTimeInterval(-5)
+        guard let urls = try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        var removed = 0
+        for url in urls {
+            guard url.lastPathComponent.lowercased().hasSuffix(".cnmt.xml") else { continue }
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+                ?? .distantPast
+            guard modified >= cutoff else { continue }
+            try? fm.removeItem(at: url)
+            removed += 1
+        }
+        if removed > 0 {
+            append("已清理 \(removed) 个临时 .cnmt.xml 元数据文件", .info)
         }
     }
 
@@ -386,8 +553,18 @@ final class AppModel {
     func clearLog() { log.removeAll() }
 
     private func requireBackendAndKeys() throws -> URL {
-        guard BackendPaths.isInstalled else {
-            throw PreflightError(message: "后端尚未安装，请到「设置」里点击「安装后端」")
+        do {
+            _ = try BackendPaths.ensureDeployed()
+            backendReady = BackendPaths.isInstalled
+        } catch let error as PreflightError {
+            backendReady = false
+            throw error
+        } catch {
+            backendReady = false
+            throw PreflightError(message: "后端准备失败：\(error.localizedDescription)")
+        }
+        guard backendReady else {
+            throw PreflightError(message: "后端未就绪，请到「设置」里点击「修复后端」")
         }
         guard keysAvailable else {
             throw PreflightError(message: "找不到密钥文件 \(keysPath)，请到「设置」里选择你自己的 prod.keys")
@@ -418,7 +595,11 @@ final class AppModel {
 
     private func nsz(_ args: [String]) async throws {
         append("$ nsz " + args.joined(separator: " "), .command)
-        try await ProcessRunner.run(BackendPaths.nsz, ["--machine-readable"] + args) {
+        // Invoke via `python -m nsz` so shebang paths inside the relocatable bundle never matter.
+        try await ProcessRunner.run(
+            BackendPaths.python,
+            ["-m", "nsz", "--machine-readable"] + args
+        ) {
             [weak self] line in Task { @MainActor in self?.handleOutput(line) }
         }
     }

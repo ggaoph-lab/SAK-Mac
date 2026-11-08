@@ -7,32 +7,35 @@
 - **万物转 NSP**：导入 XCI / NSZ / XCZ / NSP；单文件直接转 NSP，多文件（本体 + 更新 + DLC）合并成一个 NSP
 - **XCI ⇄ NSP 互转**：也可以直接输入 NSZ / XCZ
 - **NSZ / XCZ 压缩与解压**：可调压缩等级，压缩后可校验
-- **合并本体 + 更新 + DLC**：合并成一个 XCI 或 NSP；同一内容有多个版本时，自动保留最新版本
+- **合并本体 + 更新 + DLC**：任意混入 XCI / NSP / XCZ / NSZ，自动解压并统一成 NSP 后再合并成 XCI 或 NSP；同一内容有多个版本时，自动保留最新版本
 - **检测更新**：转换 / 合并 / 万物转 NSP 开始前会自动对照 titledb 检查；若缺少或落后会弹窗确认是否继续，更新包名称可复制。也可在侧边栏手动检测。不下载任何游戏内容
 
 所有功能都支持把文件拖进窗口，处理时实时显示进度和日志。
 
 ## 系统要求
 
-- macOS 14 或更高版本
-- Python 3.9 或更高版本（Homebrew 或 python.org 安装的都可以）
+- macOS 14 或更高版本（Apple Silicon / Intel 各自构建）
 - 你自己从 Switch 上导出的 `prod.keys`
+- **不需要**安装系统 Python，也**不需要**首次联网装依赖
 
 ## 构建
 
-需要安装 Xcode（SwiftUI 的宏插件只随 Xcode 提供，单独的命令行开发工具不够）。
+需要安装 Xcode（SwiftUI 的宏插件只随 Xcode 提供，单独的命令行开发工具不够），构建机需要联网以下载内置 Python 与依赖。
 
 ```bash
 ./scripts/build_app.sh
+./scripts/package_dmg.sh
 ```
 
-脚本会自动下载 NSC_BUILDER 和 nsz 的源码到 `vendor/`，打上 `patches/` 里的 macOS 兼容补丁，编译后在 `dist/` 下生成 `SwitchSwitcher.app`。
+脚本会自动下载可搬迁的 CPython、预装全部 Python 依赖，再拉取 NSC_BUILDER / nsz 源码并打上 `patches/` 里的 macOS 兼容补丁，最后在 `dist/` 下生成 `SwitchSwitcher.app` 与 DMG。
 
 ## 使用
 
-1. 打开 App，到「设置」里点「安装后端」。首次安装需要联网，大约 1 分钟，后端会装到 `~/Library/Application Support/SAKMac`。
-2. 在「设置」里选择你的 `prod.keys`，默认读取 `~/.switch/prod.keys`。
+1. 打开 DMG，把 App 拖进「应用程序」（或直接打开）。
+2. 在「设置」里确认 `prod.keys` 路径，默认读取 `~/.switch/prod.keys`。
 3. 选择功能，拖入文件，点击开始。输出默认在 `~/Downloads/SAK Output`。
+
+后端（Python + NSC_BUILDER + nsz）已打进 App。首次运行只会在 `~/Library/Application Support/SAKMac` 写入一份可写的 NSC_BUILDER 副本（用于放置密钥），全程离线。
 
 这个 App 只做了本机签名（ad-hoc）。拷到别的 Mac 上第一次打开时，需要右键选择「打开」。
 

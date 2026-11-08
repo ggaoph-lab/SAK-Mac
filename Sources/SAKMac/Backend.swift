@@ -13,11 +13,13 @@ enum BackendPaths {
     }
 
     static var bundledBackend: URL { resources.appendingPathComponent("backend", isDirectory: true) }
-    static var setupScript: URL { resources.appendingPathComponent("setup_backend.sh") }
     static var checkUpdatesScript: URL { resources.appendingPathComponent("check_updates.py") }
 
-    static var python: URL { support.appendingPathComponent("venv/bin/python") }
-    static var nsz: URL { support.appendingPathComponent("venv/bin/nsz") }
+    /// Relocatable CPython shipped inside the app (no system Python required).
+    static var pythonHome: URL { bundledBackend.appendingPathComponent("python", isDirectory: true) }
+    static var python: URL { pythonHome.appendingPathComponent("bin/python3") }
+
+    static var bundledNSCB: URL { bundledBackend.appendingPathComponent("NSC_BUILDER", isDirectory: true) }
     static var ztools: URL { support.appendingPathComponent("NSC_BUILDER/ztools", isDirectory: true) }
     static var squirrel: URL { ztools.appendingPathComponent("squirrel.py") }
     static var nscbKeys: URL { ztools.appendingPathComponent("keys.txt") }
@@ -28,11 +30,41 @@ enum BackendPaths {
         let fm = FileManager.default
         guard fm.isExecutableFile(atPath: python.path),
               fm.fileExists(atPath: squirrel.path),
-              let installed = try? String(contentsOf: installedVersion, encoding: .utf8)
+              versionsMatch
         else { return false }
+        return true
+    }
+
+    private static var versionsMatch: Bool {
+        guard let installed = try? String(contentsOf: installedVersion, encoding: .utf8) else { return false }
         let bundled = (try? String(contentsOf: bundledVersion, encoding: .utf8)) ?? installed
         return installed.trimmingCharacters(in: .whitespacesAndNewlines)
             == bundled.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Copies the writable NSC_BUILDER tree into Application Support when missing or outdated.
+    /// Python + pip packages stay inside the app bundle — no network, no system Python.
+    @discardableResult
+    static func ensureDeployed() throws -> Bool {
+        let fm = FileManager.default
+        guard fm.isExecutableFile(atPath: python.path) else {
+            throw PreflightError(message: "应用不完整：缺少内置 Python 运行时，请重新下载安装包")
+        }
+        guard fm.fileExists(atPath: bundledNSCB.appendingPathComponent("ztools/squirrel.py").path) else {
+            throw PreflightError(message: "应用不完整：缺少内置转换后端，请重新下载安装包")
+        }
+        if isInstalled { return false }
+
+        try fm.createDirectory(at: support, withIntermediateDirectories: true)
+        let dest = support.appendingPathComponent("NSC_BUILDER", isDirectory: true)
+        if fm.fileExists(atPath: dest.path) {
+            try fm.removeItem(at: dest)
+        }
+        try fm.copyItem(at: bundledNSCB, to: dest)
+
+        let version = (try? String(contentsOf: bundledVersion, encoding: .utf8)) ?? "bundled"
+        try version.write(to: installedVersion, atomically: true, encoding: .utf8)
+        return true
     }
 }
 
@@ -58,7 +90,10 @@ enum ProcessRunner {
         var env = ProcessInfo.processInfo.environment
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
-        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        // Prefer the bundled interpreter for any child tools.
+        let pyBin = BackendPaths.pythonHome.appendingPathComponent("bin").path
+        env["PATH"] = "\(pyBin):/usr/bin:/bin:/usr/sbin:/sbin"
         process.environment = env
 
         let pipe = Pipe()

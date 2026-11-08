@@ -7,12 +7,12 @@ struct ToNspView: View {
     var body: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 12) {
-            Text("导入 XCI / NSZ / XCZ / NSP；单个文件直接转成 NSP，多个文件（本体 + 更新 + DLC）合并成一个 NSP。同一内容有多个版本时保留最新。")
+            Text("导入 XCI / NSZ / XCZ / NSP。单文件直接转 NSP；多文件会先统一格式再合并成一个 NSP（与「合并」相同的一键流程）。同一内容多版本时保留最新。")
                 .foregroundStyle(.secondary)
             FileListEditor(
                 files: $model.toNspFiles,
                 extensions: ["xci", "nsp", "xcz", "nsz"],
-                hint: "单文件转换，或多文件合并为 NSP"
+                hint: "单文件转换，或多文件一键合并为 NSP"
             )
             HStack {
                 Spacer()
@@ -91,12 +91,12 @@ struct MergeView: View {
     var body: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 12) {
-            Text("把同一个游戏的本体、更新和 DLC 合并成一个文件。同一内容有多个版本时，自动保留最新版本。")
+            Text("拖入同一游戏的本体 / 更新 / DLC 即可，格式随意（XCI、NSP、XCZ、NSZ 可混用）。会先自动解压并统一成 NSP，再合并成你选的格式；同一内容多版本时保留最新。磁盘需留出大约一份本体大小的临时空间。")
                 .foregroundStyle(.secondary)
             FileListEditor(
                 files: $model.mergeFiles,
                 extensions: ["xci", "nsp", "xcz", "nsz"],
-                hint: "一次只放一个游戏的文件"
+                hint: "一次只放一个游戏；格式可混搭"
             )
             HStack {
                 Picker("输出格式", selection: $target) {

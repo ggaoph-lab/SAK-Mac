@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct FileListEditor: View {
     @Binding var files: [URL]
@@ -71,15 +70,30 @@ struct FileListEditor: View {
     }
 
     private func add(_ urls: [URL]) {
+        var added = 0
+        var skipped = 0
         for url in urls {
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { continue }
             if isDir.boolValue {
                 guard allowsFolders, !files.contains(url) else { continue }
                 files.append(url)
+                added += 1
             } else if extensions.contains(url.pathExtension.lowercased()), !files.contains(url) {
                 files.append(url)
+                added += 1
+            } else {
+                skipped += 1
             }
+        }
+        if added == 0, skipped > 0 {
+            let allow = extensions.map { ".\($0)" }.joined(separator: " / ")
+            NSSound.beep()
+            let alert = NSAlert()
+            alert.messageText = "没有可添加的文件"
+            alert.informativeText = "请选择 \(allow) 格式。"
+            alert.alertStyle = .informational
+            alert.runModal()
         }
     }
 
@@ -91,15 +105,24 @@ struct FileListEditor: View {
     private func pick(filesOnly: Bool) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
+        panel.canCreateDirectories = false
+        // Do NOT set allowedContentTypes for .nsp/.xci/.nsz/.xcz — those extensions are not
+        // registered UTIs, and UTType(filenameExtension:) makes NSOpenPanel stall ~5–15s on open
+        // while Launch Services resolves dynamic types. Filter by extension in add(_:).
         if filesOnly {
             panel.canChooseFiles = true
             panel.canChooseDirectories = false
-            panel.allowedContentTypes = extensions.compactMap { UTType(filenameExtension: $0) }
         } else {
             panel.canChooseFiles = false
             panel.canChooseDirectories = true
         }
-        if panel.runModal() == .OK { add(panel.urls) }
+        // begin() keeps the SwiftUI window responsive; runModal() freezes chrome until dismiss.
+        panel.begin { response in
+            guard response == .OK else { return }
+            DispatchQueue.main.async {
+                add(panel.urls)
+            }
+        }
     }
 
     private func isDirectory(_ url: URL) -> Bool {

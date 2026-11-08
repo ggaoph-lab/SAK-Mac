@@ -1,0 +1,88 @@
+diff --git a/py/ztools/Fs/ChromeNsp.py b/py/ztools/Fs/ChromeNsp.py
+index c0878c6..404d72b 100644
+--- a/py/ztools/Fs/ChromeNsp.py
++++ b/py/ztools/Fs/ChromeNsp.py
+@@ -6292,7 +6292,7 @@ class ChromeNsp(Pfs0):
+ 							c=c+len(data)
+ 							fp.flush()
+ 						try:
+-							os.remove(outf)
++							os.remove(xmlfile)
+ 						except:
+ 							pass
+ 					fp.close()
+@@ -6657,7 +6657,7 @@ class ChromeNsp(Pfs0):
+ 									c=c+len(data)
+ 									fp.flush()
+ 								try:
+-									os.remove(outf)
++									os.remove(xmlfile)
+ 								except:
+ 									pass
+ 						fp.close()
+diff --git a/py/ztools/Fs/ChromeXci.py b/py/ztools/Fs/ChromeXci.py
+index c639767..1629198 100644
+--- a/py/ztools/Fs/ChromeXci.py
++++ b/py/ztools/Fs/ChromeXci.py
+@@ -6291,7 +6291,7 @@ class ChromeXci(File):
+ 								t.update(len(data))
+ 								fp.flush()
+ 								try:
+-									os.remove(outf)
++									os.remove(xmlfile)
+ 								except:
+ 									pass
+ 							fp.close()
+@@ -6632,7 +6632,7 @@ class ChromeXci(File):
+ 											c=c+len(data)
+ 											fp.flush()
+ 										try:
+-											os.remove(outf)
++											os.remove(xmlfile)
+ 										except:
+ 											pass
+ 								fp.close()
+diff --git a/py/ztools/Fs/Nsp.py b/py/ztools/Fs/Nsp.py
+index e22a251..0f4d94e 100644
+--- a/py/ztools/Fs/Nsp.py
++++ b/py/ztools/Fs/Nsp.py
+@@ -6652,7 +6652,7 @@ class Nsp(Pfs0):
+ 							c=c+len(data)
+ 							fp.flush()
+ 						try:
+-							os.remove(outf)
++							os.remove(xmlfile)
+ 						except:
+ 							pass
+ 					fp.close()
+@@ -7086,7 +7086,7 @@ class Nsp(Pfs0):
+ 									c=c+len(data)
+ 									fp.flush()
+ 								try:
+-									os.remove(outf)
++									os.remove(xmlfile)
+ 								except:
+ 									pass
+ 						fp.close()
+diff --git a/py/ztools/Fs/Xci.py b/py/ztools/Fs/Xci.py
+index c87ce68..45ab880 100644
+--- a/py/ztools/Fs/Xci.py
++++ b/py/ztools/Fs/Xci.py
+@@ -6970,7 +6970,7 @@ class Xci(File):
+ 								t.update(len(data))
+ 								fp.flush()
+ 								try:
+-									os.remove(outf)
++									os.remove(xmlfile)
+ 								except:
+ 									pass
+ 							fp.close()
+@@ -7383,7 +7383,7 @@ class Xci(File):
+ 											c=c+len(data)
+ 											fp.flush()
+ 										try:
+-											os.remove(outf)
++											os.remove(xmlfile)
+ 										except:
+ 											pass
+ 								fp.close()

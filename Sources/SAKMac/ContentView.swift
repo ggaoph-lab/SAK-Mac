@@ -157,7 +157,7 @@ struct SetupBanner: View {
     var body: some View {
         HStack {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-            Text(model.backendReady ? "还没有找到你的 prod.keys 密钥文件。" : "后端工具尚未安装。")
+            Text(model.backendReady ? "还没有找到你的 prod.keys 密钥文件。" : "后端未就绪，可到设置里点「修复后端」。")
             Spacer()
             Button("前往设置", action: openSettings)
         }
